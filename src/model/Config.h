@@ -4,7 +4,10 @@
  *
  * Configuration files are pigg's ".pigg" files, so the two programs can
  * open each other's: {"pin_functions":{"26":{"Input":"PullUp"},
- * "17":{"Output":true}}}, keyed by GPIO (BCM) number.
+ * "17":{"Output":true}}}, keyed by GPIO (BCM) number. For another board
+ * than the Raspberry Pi AirPins adds {"board":"cubie-a7s"}, and the keys are
+ * that board's driver's pin numbers (see PinTable.h); a file only opens on
+ * the board it was written for.
  */
 #pragma once
 
@@ -42,8 +45,9 @@ struct Configuration {
 		{ return !(*this == other); }
 };
 
-/*!	Reads a configuration. Pins that are not configurable on the header
-	are left out and named in \a skipped.
+/*!	Reads a configuration of the current board (CurrentBoard()). Pins that
+	are not configurable on its header are left out and named in
+	\a skipped.
 */
 bool ParseConfiguration(const std::string& text, Configuration& config,
 	std::string* error = NULL, std::vector<int>* skipped = NULL);

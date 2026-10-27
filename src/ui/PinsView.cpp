@@ -31,10 +31,10 @@ namespace airpins {
 namespace {
 
 BMessage*
-PinMessage(uint32 what, int bcm)
+PinMessage(uint32 what, int gpio)
 {
 	BMessage* message = new BMessage(what);
-	message->AddInt32("pin", bcm);
+	message->AddInt32("pin", gpio);
 	return message;
 }
 
@@ -51,7 +51,7 @@ FixWidth(BMenuField* field, const char* widest)
 
 
 BMenuField*
-FunctionField(int bcm, BHandler* target)
+FunctionField(int gpio, BHandler* target)
 {
 	BPopUpMenu* menu = new BPopUpMenu("function");
 	const struct { const char* label; PinMode mode; } kModes[] = {
@@ -60,7 +60,7 @@ FunctionField(int bcm, BHandler* target)
 		{ "Output", PinMode::Output },
 	};
 	for (const auto& mode : kModes) {
-		BMessage* message = PinMessage(kMsgSetPinMode, bcm);
+		BMessage* message = PinMessage(kMsgSetPinMode, gpio);
 		message->AddInt32("mode", (int32)mode.mode);
 		BMenuItem* item = new BMenuItem(mode.label, message);
 		item->SetTarget(target);
@@ -74,12 +74,12 @@ FunctionField(int bcm, BHandler* target)
 
 
 BMenuField*
-PullField(int bcm, BHandler* target)
+PullField(int gpio, BHandler* target)
 {
 	BPopUpMenu* menu = new BPopUpMenu("pull");
 	const Pull kPulls[] = { Pull::Up, Pull::Down, Pull::None };
 	for (Pull pull : kPulls) {
-		BMessage* message = PinMessage(kMsgSetPinPull, bcm);
+		BMessage* message = PinMessage(kMsgSetPinPull, gpio);
 		message->AddInt32("pull", (int32)pull);
 		BMenuItem* item = new BMenuItem(PullName(pull), message);
 		item->SetTarget(target);
@@ -189,12 +189,35 @@ PinsView::Rebuild()
 	switch (fMode) {
 		case LayoutMode::Board:
 		{
-			BGridLayout* grid = new BGridLayout(B_USE_SMALL_SPACING,
-				B_USE_SMALL_SPACING);
-			column->AddItem(grid);
-			for (int row = 0; row < kHeaderPinCount / 2; row++) {
-				_AddPin(grid, row, 0, HeaderPinAt(row * 2), true);
-				_AddPin(grid, row, 7, HeaderPinAt(row * 2 + 1), false);
+			// each connector of the board: two columns of pins as on the
+			// header (odd pins on the left), or one
+			for (int i = 0; i < ConnectorCount(); i++) {
+				const Connector& connector = ConnectorAt(i);
+				if (connector.name != NULL) {
+					BString title;
+					title.SetToFormat("%s (%d pins)", connector.name,
+						connector.pinCount);
+					BStringView* label = new BStringView("connector", title);
+					BFont font(be_bold_font);
+					label->SetFont(&font);
+					column->AddView(label);
+				}
+				BGridLayout* grid = new BGridLayout(B_USE_SMALL_SPACING,
+					B_USE_SMALL_SPACING);
+				column->AddItem(grid);
+				if (connector.columns == 2) {
+					for (int row = 0; row < connector.pinCount / 2; row++) {
+						_AddPin(grid, row, 0,
+							HeaderPinAt(connector.first + row * 2), true);
+						_AddPin(grid, row, 7,
+							HeaderPinAt(connector.first + row * 2 + 1), false);
+					}
+				} else {
+					for (int row = 0; row < connector.pinCount; row++) {
+						_AddPin(grid, row, 0,
+							HeaderPinAt(connector.first + row), false);
+					}
+				}
 			}
 			break;
 		}
@@ -210,13 +233,13 @@ PinsView::Rebuild()
 				BStringView* label = new BStringView("dock label",
 					"Unused pins:");
 				dock->AddView(label);
-				for (int i = 0; i < kHeaderPinCount; i++) {
+				for (int i = 0; i < HeaderPinCount(); i++) {
 					const HeaderPin& pin = HeaderPinAt(i);
 					if (pin.kind != PinKind::Gpio
-						|| fPins[pin.bcm].Configured()) {
+						|| fPins[pin.gpio].Configured()) {
 						continue;
 					}
-					PinButton* button = new PinButton(pin, &fPins[pin.bcm],
+					PinButton* button = new PinButton(pin, &fPins[pin.gpio],
 						fTarget, true);
 					fDock.push_back(button);
 					dock->AddView(button);
@@ -227,11 +250,9 @@ PinsView::Rebuild()
 			}
 
 			std::vector<int> pins;
-			for (int bcm = 0; bcm < kBcmPinCount; bcm++) {
-				if (IsConfigurable(bcm)
-					&& (!compact || fPins[bcm].Configured())) {
-					pins.push_back(bcm);
-				}
+			for (int gpio : GpioOrder()) {
+				if (!compact || fPins[gpio].Configured())
+					pins.push_back(gpio);
 			}
 			if (pins.empty()) {
 				BStringView* empty = new BStringView("empty",
@@ -245,8 +266,8 @@ PinsView::Rebuild()
 				B_USE_SMALL_SPACING);
 			column->AddItem(grid);
 			int row = 0;
-			for (int bcm : pins)
-				_AddPin(grid, row++, 0, *HeaderPinForBcm(bcm), false);
+			for (int gpio : pins)
+				_AddPin(grid, row++, 0, *HeaderPinForGpio(gpio), false);
 			break;
 		}
 	}
@@ -271,14 +292,14 @@ PinsView::_AddPin(BGridLayout* grid, int row, int firstColumn,
 		return mirrored ? firstColumn + 6 - index : firstColumn + index;
 	};
 
-	PinEntry* entry = pin.kind == PinKind::Gpio ? &fPins[pin.bcm] : NULL;
+	PinEntry* entry = pin.kind == PinKind::Gpio ? &fPins[pin.gpio] : NULL;
 	PinButton* button = new PinButton(pin, entry, fTarget);
 	grid->AddView(button, column(0), row);
 
 	BStringView* name = new BStringView("name", pin.name);
 	name->SetAlignment(mirrored ? B_ALIGN_RIGHT : B_ALIGN_LEFT);
 	grid->AddView(name, column(1), row);
-	if (pin.kind == PinKind::IdEeprom || pin.kind == PinKind::Ground
+	if (pin.kind == PinKind::Reserved || pin.kind == PinKind::Ground
 		|| pin.kind == PinKind::Power3V3 || pin.kind == PinKind::Power5V) {
 		name->SetHighUIColor(B_PANEL_TEXT_COLOR, B_DISABLED_LABEL_TINT);
 	}
@@ -286,7 +307,7 @@ PinsView::_AddPin(BGridLayout* grid, int row, int firstColumn,
 		return;
 
 	Widgets widgets = {};
-	widgets.bcm = pin.bcm;
+	widgets.gpio = pin.gpio;
 	widgets.button = button;
 	widgets.name = name;
 
@@ -298,7 +319,7 @@ PinsView::_AddPin(BGridLayout* grid, int row, int firstColumn,
 	widgets.hint->SetAlignment(mirrored ? B_ALIGN_RIGHT : B_ALIGN_LEFT);
 	grid->AddView(widgets.hint, column(2), row);
 
-	widgets.function = FunctionField(pin.bcm, fTarget);
+	widgets.function = FunctionField(pin.gpio, fTarget);
 	grid->AddView(widgets.function, column(3), row);
 
 	BView* options = new BView("options", 0);
@@ -306,13 +327,13 @@ PinsView::_AddPin(BGridLayout* grid, int row, int firstColumn,
 	widgets.options = new BCardLayout();
 	options->SetLayout(widgets.options);
 	widgets.options->AddView(new BView("none", 0));
-	widgets.pull = PullField(pin.bcm, fTarget);
+	widgets.pull = PullField(pin.gpio, fTarget);
 	BView* pullHolder = new BView("pull holder", 0);
 	BLayoutBuilder::Group<>(pullHolder, B_HORIZONTAL, 0)
 		.Add(widgets.pull);
 	widgets.options->AddView(pullHolder);
 	widgets.toggle = new IconButton("level", "High", kIconToggleOn,
-		PinMessage(kMsgToggleOutput, pin.bcm));
+		PinMessage(kMsgToggleOutput, pin.gpio));
 	widgets.toggle->SetTarget(fTarget);
 	widgets.toggle->SetToolTip("Click to toggle the output's level");
 	BSize toggleSize = widgets.toggle->PreferredSize();
@@ -335,7 +356,7 @@ PinsView::_AddPin(BGridLayout* grid, int row, int firstColumn,
 void
 PinsView::_Update(Widgets& widgets)
 {
-	const PinEntry& entry = fPins[widgets.bcm];
+	const PinEntry& entry = fPins[widgets.gpio];
 	const PinHardwareState& hardware = entry.hardware;
 	bool busy = hardware.claimedElsewhere;
 
@@ -346,7 +367,7 @@ PinsView::_Update(Widgets& widgets)
 	if (busy)
 		hint = "in use";
 	else if (!entry.Configured() && alt >= 0) {
-		const char* signal = AltSignal(widgets.bcm, alt);
+		const char* signal = AltSignal(widgets.gpio, alt);
 		hint = signal != NULL ? signal : FunctionSelectName(hardware.function);
 	}
 	if (hint != widgets.hint->Text())
@@ -380,10 +401,10 @@ PinsView::_Update(Widgets& widgets)
 
 
 void
-PinsView::UpdatePin(int bcm)
+PinsView::UpdatePin(int gpio)
 {
 	for (Widgets& widgets : fWidgets) {
-		if (widgets.bcm == bcm)
+		if (widgets.gpio == gpio)
 			_Update(widgets);
 	}
 	for (PinButton* button : fDock)
@@ -402,13 +423,13 @@ PinsView::UpdateAll()
 
 
 void
-PinsView::UpdateLevel(int bcm)
+PinsView::UpdateLevel(int gpio)
 {
 	for (Widgets& widgets : fWidgets) {
-		if (widgets.bcm != bcm)
+		if (widgets.gpio != gpio)
 			continue;
 		widgets.led->Update();
-		const PinEntry& entry = fPins[bcm];
+		const PinEntry& entry = fPins[gpio];
 		if (entry.setting.mode == PinMode::Output && entry.setting.level < 0)
 			_Update(widgets);
 	}

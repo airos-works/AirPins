@@ -21,26 +21,36 @@ namespace {
 
 class SimulatedGpio : public GpioHardware {
 public:
-	SimulatedGpio()
+	SimulatedGpio(Board board)
 		:
+		fBoard(board),
 		fLock("simulated gpio"),
 		fWakeUp(create_sem(0, "simulated gpio events")),
 		fRandom(0x41495250)		// "AIRP"
 	{
-		// as a Raspberry Pi 4 starts: GPIO 0 to 8 pulled up, the others
-		// pulled down, GPIO 14 and 15 belong to the serial port
-		for (int pin = 0; pin < kBcmPinCount; pin++) {
+		// as the board starts: a Raspberry Pi 4's GPIO 0 to 8 pulled up,
+		// the others pulled down, GPIO 14 and 15 belong to the serial port;
+		// the A733's pins are off without a pull, but for the console's
+		for (int pin = 0; pin < kMaxGpioPins; pin++) {
 			Pin& state = fPins[pin];
-			state.function = kFunctionInput;
-			state.pull = DefaultPullUp(pin) ? 1 : 2;
-			state.level = DefaultPullUp(pin);
+			Pull pull = DefaultPull(pin);
+			state.function = board == Board::CubieA7S
+				? (uint8)kSunxiFunctionOff : (uint8)kFunctionInput;
+			state.pull = pull == Pull::Up ? 1 : pull == Pull::Down ? 2 : 0;
+			state.level = pull == Pull::Up;
 			state.claimed = false;
 			state.nextChange = 0;
 		}
-		fPins[14].function = fPins[15].function = kFunctionAlt0;
-		fPins[14].level = fPins[15].level = true;
-		fPins[14].pull = 0;
-		fPins[15].pull = 1;
+		if (board == Board::CubieA7S) {
+			// UART0 on J11 pins 8 and 10
+			fPins[8].function = fPins[10].function = 2;
+			fPins[8].level = fPins[10].level = true;
+		} else {
+			fPins[14].function = fPins[15].function = kFunctionAlt0;
+			fPins[14].level = fPins[15].level = true;
+			fPins[14].pull = 0;
+			fPins[15].pull = 1;
+		}
 	}
 
 	~SimulatedGpio() override
@@ -53,7 +63,9 @@ public:
 		HardwareDetails details;
 		details.name = "Simulated GPIO";
 		details.simulated = true;
-		details.revision = 0xc03115;
+		details.board = fBoard;
+		if (fBoard == Board::RaspberryPi4)
+			details.revision = 0xc03115;
 		details.edgeInterrupts = true;
 		return details;
 	}
@@ -63,7 +75,7 @@ public:
 		BAutolock locker(fLock);
 		_Run(system_time());
 		state.time = system_time();
-		for (int pin = 0; pin < kBcmPinCount; pin++) {
+		for (int pin = 0; pin < kMaxGpioPins; pin++) {
 			state.pins[pin].function = fPins[pin].function;
 			state.pins[pin].pull = fPins[pin].pull;
 			state.pins[pin].level = fPins[pin].level;
@@ -75,7 +87,7 @@ public:
 
 	status_t Configure(int pin, const PinSetting& setting) override
 	{
-		if (pin < 0 || pin >= kBcmPinCount)
+		if (pin < 0 || pin >= kMaxGpioPins)
 			return B_BAD_VALUE;
 		BAutolock locker(fLock);
 		Pin& state = fPins[pin];
@@ -120,7 +132,7 @@ public:
 
 	status_t Write(int pin, bool level) override
 	{
-		if (pin < 0 || pin >= kBcmPinCount)
+		if (pin < 0 || pin >= kMaxGpioPins)
 			return B_BAD_VALUE;
 		BAutolock locker(fLock);
 		Pin& state = fPins[pin];
@@ -206,7 +218,7 @@ private:
 	//! Changes the simulated inputs whose time has come.
 	void _Run(bigtime_t now)
 	{
-		for (int pin = 0; pin < kBcmPinCount; pin++) {
+		for (int pin = 0; pin < kMaxGpioPins; pin++) {
 			Pin& state = fPins[pin];
 			if (!state.claimed || state.function != kFunctionInput)
 				continue;
@@ -218,10 +230,11 @@ private:
 		}
 	}
 
+	Board				fBoard;
 	BLocker				fLock;
 	sem_id				fWakeUp;
 	uint32				fRandom;
-	Pin					fPins[kBcmPinCount];
+	Pin					fPins[kMaxGpioPins];
 	std::deque<GpioEvent> fEvents;
 };
 
@@ -229,9 +242,9 @@ private:
 
 
 GpioHardware*
-CreateSimulatedGpio()
+CreateSimulatedGpio(Board board)
 {
-	return new SimulatedGpio;
+	return new SimulatedGpio(board);
 }
 
 }	// namespace airpins

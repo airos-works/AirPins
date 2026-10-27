@@ -92,4 +92,19 @@ DecodeRevision(uint32_t revision)
 	return info;
 }
 
+
+BoardInfo
+DescribeBoard(Board board, uint32_t revision)
+{
+	if (board == Board::RaspberryPi4)
+		return DecodeRevision(revision);
+
+	BoardInfo info;
+	info.known = true;
+	info.model = BoardName(board);
+	info.processor = "Allwinner A733";
+	info.manufacturer = "Radxa";
+	return info;
+}
+
 }	// namespace airpins

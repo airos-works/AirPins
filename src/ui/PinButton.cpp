@@ -22,10 +22,10 @@ namespace airpins {
 namespace {
 
 BMessage*
-FunctionMessage(int bcm, PinMode mode, Pull pull = Pull::None)
+FunctionMessage(int gpio, PinMode mode, Pull pull = Pull::None)
 {
 	BMessage* message = new BMessage(kMsgSetPinFunction);
-	message->AddInt32("pin", bcm);
+	message->AddInt32("pin", gpio);
 	message->AddInt32("mode", (int32)mode);
 	message->AddInt32("pull", (int32)pull);
 	return message;
@@ -144,7 +144,7 @@ PinButton::MouseDown(BPoint where)
 	menu->SetAsyncAutoDestruct(true);
 
 	BString title;
-	title.SetToFormat("Pin %u: %s", fPin.board, fPin.name);
+	title.SetToFormat("%s: %s", PinPosition(fPin).c_str(), fPin.name);
 	BMenuItem* titleItem = new BMenuItem(title, NULL);
 	titleItem->SetEnabled(false);
 	menu->AddItem(titleItem);
@@ -156,7 +156,7 @@ PinButton::MouseDown(BPoint where)
 	const Pull pulls[] = { Pull::Up, Pull::Down, Pull::None };
 	for (Pull pull : pulls) {
 		BMenuItem* item = new BMenuItem(PullName(pull),
-			FunctionMessage(fPin.bcm, PinMode::Input, pull));
+			FunctionMessage(fPin.gpio, PinMode::Input, pull));
 		item->SetMarked(setting.mode == PinMode::Input && setting.pull == pull);
 		input->AddItem(item);
 	}
@@ -167,13 +167,13 @@ PinButton::MouseDown(BPoint where)
 	menu->AddItem(inputItem);
 
 	BMenuItem* output = new BMenuItem("Output",
-		FunctionMessage(fPin.bcm, PinMode::Output));
+		FunctionMessage(fPin.gpio, PinMode::Output));
 	output->SetMarked(setting.mode == PinMode::Output);
 	output->SetEnabled(!busy);
 	menu->AddItem(output);
 	menu->AddSeparatorItem();
 	BMenuItem* unused = new BMenuItem("Unused",
-		FunctionMessage(fPin.bcm, PinMode::Unused));
+		FunctionMessage(fPin.gpio, PinMode::Unused));
 	unused->SetMarked(setting.mode == PinMode::Unused);
 	unused->SetEnabled(!busy);
 	menu->AddItem(unused);
@@ -212,7 +212,7 @@ BString
 PinButton::Description(const HeaderPin& pin, const PinEntry* entry)
 {
 	BString text;
-	text.SetToFormat("Pin %u: %s", pin.board, pin.name);
+	text.SetToFormat("%s: %s", PinPosition(pin).c_str(), pin.name);
 	switch (pin.kind) {
 		case PinKind::Power3V3:
 			text << "\n3.3 V supply";
@@ -222,26 +222,29 @@ PinButton::Description(const HeaderPin& pin, const PinEntry* entry)
 			return text;
 		case PinKind::Ground:
 			return text;
-		case PinKind::IdEeprom:
-			text.SetToFormat("Pin %u: GPIO%d (%s)\nThe HAT ID EEPROM's I2C bus,"
-				" reserved", pin.board, pin.bcm, pin.name);
+		case PinKind::Reserved:
+			text << "\n" << pin.note << ", reserved";
 			return text;
 		case PinKind::Gpio:
 			break;
 	}
+	if (pin.note != NULL)
+		text << " (" << pin.note << ")";
 
 	if (entry != NULL) {
 		const PinHardwareState& hardware = entry->hardware;
 		int alt = AltIndex(hardware.function);
 		if (alt >= 0) {
-			const char* signal = AltSignal(pin.bcm, alt);
-			const char* group = SignalGroup(signal);
+			const char* signal = AltSignal(pin.gpio, alt);
+			std::string group = SignalGroup(signal);
 			text << "\nNow: " << FunctionSelectName(hardware.function);
 			if (signal != NULL) {
 				text << " " << signal;
-				if (group != NULL)
-					text << " (" << group << ")";
+				if (!group.empty())
+					text << " (" << group.c_str() << ")";
 			}
+		} else if (!entry->Configured() && IsSwitchedOff(hardware.function)) {
+			text << "\nNow: switched off";
 		} else if (!entry->Configured()) {
 			text << "\nNow: "
 				<< (hardware.function == kFunctionOutput ? "output" : "input")
@@ -254,10 +257,10 @@ PinButton::Description(const HeaderPin& pin, const PinEntry* entry)
 	}
 
 	text << "\nAlternate functions:";
-	for (int alt = 0; alt < 6; alt++) {
-		const char* signal = AltSignal(pin.bcm, alt);
+	for (int alt = 0; alt < AltCount(); alt++) {
+		const char* signal = AltSignal(pin.gpio, alt);
 		if (signal != NULL)
-			text << "\n  ALT" << alt << "  " << signal;
+			text << "\n  " << AltName(alt) << "  " << signal;
 	}
 	if (entry != NULL && !entry->hardware.claimedElsewhere)
 		text << "\nClick to set the pin's function.";

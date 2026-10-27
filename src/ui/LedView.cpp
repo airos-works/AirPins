@@ -138,7 +138,7 @@ void
 LedView::_SendHold(bool pressed)
 {
 	BMessage message(kMsgHoldOutput);
-	message.AddInt32("pin", fEntry->bcm);
+	message.AddInt32("pin", fEntry->gpio);
 	message.AddBool("pressed", pressed);
 	BMessenger(fTarget).SendMessage(&message);
 }

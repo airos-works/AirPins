@@ -1,9 +1,9 @@
 # AirPins
 
-A GPIO tool for the Raspberry Pi on **air/OS** and Haiku: set the pins of the
-40-pin header as inputs or outputs, switch outputs, and watch the level of
-every configured pin as an LED and a waveform. Configurations are saved as
-`.pigg` files.
+A GPIO tool for the Raspberry Pi and the Radxa Cubie A7S on **air/OS** and
+Haiku. It sets the pins of the board's headers as inputs or outputs, switches
+outputs, and shows the level of every configured pin as an LED and a
+waveform. Configurations are saved as `.pigg` files.
 
 <img src="resources/branding/AirPins.png" alt="AirPins icon artwork" width="160">
 
@@ -58,6 +58,14 @@ changes are timestamped by the kernel driver in the GPIO interrupt.
 - The **air/OS Raspberry Pi 4 image**, whose `rpi_gpio` driver
   (`/dev/misc/rpi_gpio`) gives programs the header's pins. Raspberry Pi 4
   Model B and 400 (BCM2711).
+- Or the **air/OS Radxa Cubie A7S image** (Allwinner A733). Its
+  `sunxi_gpio` driver (`/dev/misc/sunxi_gpio`) has the same interface and
+  gives programs the pins of the board's 30-pin J11 and 15-pin J6 headers.
+  The driver says which board it drives, and AirPins then shows that board's
+  headers. On the Cubie, pins are named after the A733's ports (PB0, PL5...),
+  functions are its multiplexer's (F2 to F13, EINT), and the *Port pin
+  layout* sorts the pins by port. A configuration saved there carries
+  `"board":"cubie-a7s"` and opens only on that board.
 - Anywhere else (another computer, QEMU, a Pi without the driver) AirPins
   starts with simulated pins and says so in its status bar.
   `AirPins --simulate` asks for them on a Pi as well, and *Device ▸ Use
@@ -126,14 +134,15 @@ in the air/OS Haiku tree (`build_airpins`).
 | --- | --- |
 | Pin table (header layout, colours, alternate functions) | `src/model/PinTable.*` |
 | `.pigg` files (a small JSON reader) | `src/model/Config.*`, `src/model/Json.*` |
-| Raspberry Pi revision codes | `src/model/BoardInfo.*` |
+| Board descriptions (Raspberry Pi revision codes) | `src/model/BoardInfo.*` |
 | A pin's level history | `src/model/PinHistory.*` |
 | The pins: driver or simulation | `src/hw/LocalGpio.cpp`, `src/hw/SimulatedGpio.cpp`, `src/hw/Gpio.h` |
 | Level changes from a thread of their own | `src/hw/EventPump.*` |
 | Window, layouts, pin widgets | `src/ui/` |
 
 The driver (`src/add-ons/kernel/drivers/misc/rpi_gpio.cpp` in the air/OS
-tree, interface in `src/hw/rpi_gpio.h`) lets a file descriptor claim a header
+tree, or `sunxi_gpio.cpp` on the Cubie A7S; interface in `src/hw/rpi_gpio.h`)
+lets a file descriptor claim a header
 pin as an input or output and restores the pin when it is released or the
 descriptor closes. Edges of claimed inputs are timestamped in the GPIO
 interrupt; a pulse shorter than the interrupt's latency shows up as two

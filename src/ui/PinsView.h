@@ -45,9 +45,9 @@ public:
 			LayoutMode			Mode() const { return fMode; }
 			void				Rebuild();
 
-			void				UpdatePin(int bcm);
+			void				UpdatePin(int gpio);
 			void				UpdateAll();
-			void				UpdateLevel(int bcm);
+			void				UpdateLevel(int gpio);
 			void				Tick(bigtime_t now);
 			void				SetSpan(bigtime_t span);
 
@@ -55,7 +55,7 @@ public:
 
 private:
 	struct Widgets {
-		int				bcm;
+		int				gpio;
 		PinButton*		button;
 		BStringView*	name;
 		BStringView*	hint;

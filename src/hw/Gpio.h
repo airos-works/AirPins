@@ -23,7 +23,7 @@ struct PinHardwareState {
 
 struct HardwareState {
 	bigtime_t			time = 0;
-	PinHardwareState	pins[kBcmPinCount];
+	PinHardwareState	pins[kMaxGpioPins];
 };
 
 // GpioEvent.flags, as the driver's
@@ -42,6 +42,8 @@ struct GpioEvent {
 
 struct HardwareDetails {
 	BString		name;			// "Local GPIO", "Simulated GPIO"
+	BString		devicePath;		// the driver's device, if any
+	Board		board = Board::RaspberryPi4;
 	bool		simulated = false;
 	uint32		revision = 0;	// the board's revision code
 	uint64		serial = 0;
@@ -50,8 +52,8 @@ struct HardwareDetails {
 };
 
 
-/*!	The GPIO pins: the board's own through /dev/misc/rpi_gpio, or simulated
-	ones. Pins configured through an object go back to what they were when
+/*!	The GPIO pins: the board's own through /dev/misc/rpi_gpio (or the
+	same interface for another board's header), or simulated ones. Pins configured through an object go back to what they were when
 	it is deleted. WaitEvents() may run in a thread of its own while the
 	other methods are called.
 */
@@ -72,6 +74,7 @@ public:
 
 //! The board's pins, or NULL (and why in \a error) on another machine.
 GpioHardware* CreateLocalGpio(BString* error = NULL);
-GpioHardware* CreateSimulatedGpio();
+//! Simulated pins of the board's header.
+GpioHardware* CreateSimulatedGpio(Board board);
 
 }	// namespace airpins

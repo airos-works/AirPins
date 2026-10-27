@@ -52,12 +52,19 @@ const int kSpans[] = { 4, 16, 30, 60 };
 
 
 BString
-PinLabel(int bcm)
+Label(int gpio)
 {
-	BString label;
-	const HeaderPin* pin = HeaderPinForBcm(bcm);
-	label.SetToFormat("GPIO%d (pin %u)", bcm, pin != NULL ? pin->board : 0);
-	return label;
+	return BString(airpins::PinLabel(gpio).c_str());
+}
+
+
+BString
+OrderLayoutTip()
+{
+	BString tip;
+	tip.SetToFormat("%s pin layout: the GPIOs in %s order", GpioOrderName(),
+		CurrentBoard() == Board::CubieA7S ? "port" : "number");
+	return tip;
 }
 
 }	// namespace
@@ -81,8 +88,8 @@ MainWindow::MainWindow(const BMessage& settings, bool simulate)
 	fMessageClearer(NULL),
 	fSpanSeconds(16)
 {
-	for (int bcm = 0; bcm < kBcmPinCount; bcm++)
-		fPins[bcm].bcm = bcm;
+	for (int gpio = 0; gpio < kMaxGpioPins; gpio++)
+		fPins[gpio].gpio = gpio;
 
 	BMenuBar* menuBar = new BMenuBar("menu bar");
 	_BuildMenu(menuBar);
@@ -97,14 +104,14 @@ MainWindow::MainWindow(const BMessage& settings, bool simulate)
 	};
 	BMessage* board = new BMessage(kMsgSetLayout);
 	board->AddInt32("layout", (int32)LayoutMode::Board);
-	BMessage* bcm = new BMessage(kMsgSetLayout);
-	bcm->AddInt32("layout", (int32)LayoutMode::Bcm);
+	BMessage* order = new BMessage(kMsgSetLayout);
+	order->AddInt32("layout", (int32)LayoutMode::Bcm);
 	BMessage* compact = new BMessage(kMsgSetLayout);
 	compact->AddInt32("layout", (int32)LayoutMode::Compact);
 	fLayoutButtons[0] = toolButton("board", kIconBoardLayout, board,
-		"Board pin layout: the pins as on the 40-pin header");
-	fLayoutButtons[1] = toolButton("bcm", kIconBcmLayout, bcm,
-		"BCM pin layout: the GPIOs in number order");
+		BoardLayoutTip());
+	fLayoutButtons[1] = toolButton("bcm", kIconBcmLayout, order,
+		OrderLayoutTip());
 	fLayoutButtons[2] = toolButton("compact", kIconCompactLayout, compact,
 		"Compact layout: only the configured pins");
 	for (IconButton* button : fLayoutButtons)
@@ -193,6 +200,16 @@ MainWindow::~MainWindow()
 	_ReleaseHardware();
 	delete fOpenPanel;
 	delete fSavePanel;
+}
+
+
+//! The GPIO order layout's menu item says the board's order.
+void
+MainWindow::_UpdateLayoutLabels()
+{
+	BString label;
+	label.SetToFormat("%s pin layout", GpioOrderName());
+	fLayoutItems[1]->SetLabel(label);
 }
 
 
@@ -306,17 +323,17 @@ MainWindow::MessageReceived(BMessage* message)
 		case kMsgSetPinPull:
 		case kMsgSetPinFunction:
 		{
-			int32 bcm;
-			if (message->FindInt32("pin", &bcm) != B_OK || !IsConfigurable(bcm))
+			int32 gpio;
+			if (message->FindInt32("pin", &gpio) != B_OK || !IsConfigurable(gpio))
 				break;
-			PinSetting setting = fPins[bcm].setting;
+			PinSetting setting = fPins[gpio].setting;
 			int32 value;
 			if (message->what != kMsgSetPinPull
 				&& message->FindInt32("mode", &value) == B_OK) {
 				PinMode mode = (PinMode)value;
 				if (mode == PinMode::Input && setting.mode != PinMode::Input) {
 					// the pull the pin has after reset, as pigg does
-					setting.pull = DefaultPullUp(bcm) ? Pull::Up : Pull::Down;
+					setting.pull = DefaultPull(gpio);
 				}
 				if (mode == PinMode::Output && setting.mode != PinMode::Output)
 					setting.level = 0;
@@ -327,25 +344,25 @@ MainWindow::MessageReceived(BMessage* message)
 				&& setting.mode == PinMode::Input) {
 				setting.pull = (Pull)value;
 			}
-			_SetPin(bcm, setting, true);
+			_SetPin(gpio, setting, true);
 			break;
 		}
 
 		case kMsgToggleOutput:
 		{
-			int32 bcm;
-			if (message->FindInt32("pin", &bcm) == B_OK)
-				_ToggleOutput(bcm);
+			int32 gpio;
+			if (message->FindInt32("pin", &gpio) == B_OK)
+				_ToggleOutput(gpio);
 			break;
 		}
 
 		case kMsgHoldOutput:
 		{
-			int32 bcm;
+			int32 gpio;
 			bool pressed;
-			if (message->FindInt32("pin", &bcm) == B_OK
+			if (message->FindInt32("pin", &gpio) == B_OK
 				&& message->FindBool("pressed", &pressed) == B_OK) {
-				_HoldOutput(bcm, pressed);
+				_HoldOutput(gpio, pressed);
 			}
 			break;
 		}
@@ -463,12 +480,23 @@ MainWindow::_UseHardware(bool simulated)
 	if (hardware == NULL) {
 		if (!simulated)
 			_ShowMessage("No GPIO hardware found: the pins are simulated");
-		hardware = CreateSimulatedGpio();
+		// the pins of the board last seen, the Pi's at first
+		hardware = CreateSimulatedGpio(CurrentBoard());
 		simulated = true;
 	}
 	fHardware = hardware;
 	fSimulated = simulated;
 	fHardwareName = fHardware->Details().name;
+
+	// another board's pins are other pins: nothing carries over
+	Board board = fHardware->Details().board;
+	if (board != CurrentBoard()) {
+		SetBoard(board);
+		configuration = Configuration();
+		fLayoutButtons[0]->SetToolTip(BoardLayoutTip());
+		fLayoutButtons[1]->SetToolTip(OrderLayoutTip());
+		_UpdateLayoutLabels();
+	}
 
 	for (PinEntry& entry : fPins) {
 		entry.setting = PinSetting();
@@ -500,13 +528,13 @@ MainWindow::_ReleaseHardware()
 
 
 bool
-MainWindow::_SetPin(int bcm, const PinSetting& setting, bool ask)
+MainWindow::_SetPin(int gpio, const PinSetting& setting, bool ask)
 {
-	if (!IsConfigurable(bcm) || fHardware == NULL)
+	if (!IsConfigurable(gpio) || fHardware == NULL)
 		return false;
-	PinEntry& entry = fPins[bcm];
+	PinEntry& entry = fPins[gpio];
 	if (entry.Configured() && setting == entry.setting) {
-		fPinsView->UpdatePin(bcm);
+		fPinsView->UpdatePin(gpio);
 		return true;
 	}
 
@@ -514,25 +542,25 @@ MainWindow::_SetPin(int bcm, const PinSetting& setting, bool ask)
 		if (entry.hardware.claimedElsewhere) {
 			BString text;
 			text.SetToFormat("%s is in use by another program.",
-				PinLabel(bcm).String());
+				Label(gpio).String());
 			_ShowMessage(text);
-			fPinsView->UpdatePin(bcm);
+			fPinsView->UpdatePin(gpio);
 			return false;
 		}
 		if (ask && AltIndex(entry.hardware.function) >= 0
-			&& !_ConfirmTakeOver(std::vector<int>(1, bcm))) {
-			fPinsView->UpdatePin(bcm);
+			&& !_ConfirmTakeOver(std::vector<int>(1, gpio))) {
+			fPinsView->UpdatePin(gpio);
 			return false;
 		}
 	}
 
 	entry.holding = false;
-	status_t status = fHardware->Configure(bcm, setting);
+	status_t status = fHardware->Configure(gpio, setting);
 	if (status != B_OK) {
 		BString text;
-		text.SetToFormat("%s: %s", PinLabel(bcm).String(), strerror(status));
+		text.SetToFormat("%s: %s", Label(gpio).String(), strerror(status));
 		_ShowMessage(text);
-		fPinsView->UpdatePin(bcm);
+		fPinsView->UpdatePin(gpio);
 		return false;
 	}
 
@@ -549,7 +577,7 @@ MainWindow::_SetPin(int bcm, const PinSetting& setting, bool ask)
 			fPinsView->Rebuild();
 			_FitToContent();
 		} else
-			fPinsView->UpdatePin(bcm);
+			fPinsView->UpdatePin(gpio);
 		_UpdateStatus();
 	}
 	return true;
@@ -573,22 +601,22 @@ MainWindow::_ApplyConfiguration(const Configuration& config, bool ask)
 
 	fApplying = true;
 	std::vector<int> failed;
-	for (int bcm = 0; bcm < kBcmPinCount; bcm++) {
-		if (!IsConfigurable(bcm))
+	for (int gpio = 0; gpio < kMaxGpioPins; gpio++) {
+		if (!IsConfigurable(gpio))
 			continue;
-		auto found = config.pins.find(bcm);
+		auto found = config.pins.find(gpio);
 		PinSetting setting;
 		if (found != config.pins.end())
 			setting = found->second;
 		if (!useAlternates
-			&& std::find(takeOver.begin(), takeOver.end(), bcm)
+			&& std::find(takeOver.begin(), takeOver.end(), gpio)
 				!= takeOver.end()) {
 			setting = PinSetting();
 		}
-		if (setting.mode == PinMode::Unused && !fPins[bcm].Configured())
+		if (setting.mode == PinMode::Unused && !fPins[gpio].Configured())
 			continue;
-		if (!_SetPin(bcm, setting, false))
-			failed.push_back(bcm);
+		if (!_SetPin(gpio, setting, false))
+			failed.push_back(gpio);
 	}
 	fApplying = false;
 
@@ -597,8 +625,8 @@ MainWindow::_ApplyConfiguration(const Configuration& config, bool ask)
 	_UpdateStatus();
 	if (!failed.empty()) {
 		BString text = "Not configured:";
-		for (int bcm : failed)
-			text << " GPIO" << bcm;
+		for (int gpio : failed)
+			text << " " << Label(gpio);
 		_ShowMessage(text);
 	}
 }
@@ -610,7 +638,7 @@ MainWindow::_CurrentConfiguration() const
 	Configuration config;
 	for (const PinEntry& entry : fPins) {
 		if (entry.Configured())
-			config.pins[entry.bcm] = entry.setting;
+			config.pins[entry.gpio] = entry.setting;
 	}
 	return config;
 }
@@ -630,15 +658,15 @@ bool
 MainWindow::_ConfirmTakeOver(const std::vector<int>& pins)
 {
 	BString text;
-	for (int bcm : pins) {
-		const PinHardwareState& hardware = fPins[bcm].hardware;
-		const char* signal = AltSignal(bcm, AltIndex(hardware.function));
-		const char* group = SignalGroup(signal);
+	for (int gpio : pins) {
+		const PinHardwareState& hardware = fPins[gpio].hardware;
+		const char* signal = AltSignal(gpio, AltIndex(hardware.function));
+		std::string group = SignalGroup(signal);
 		BString line;
-		line.SetToFormat("%s is %s%s%s%s.\n", PinLabel(bcm).String(),
+		line.SetToFormat("%s is %s%s%s%s.\n", Label(gpio).String(),
 			signal != NULL ? signal : FunctionSelectName(hardware.function),
-			group != NULL ? " of " : "", group != NULL ? group : "",
-			(bcm == 14 || bcm == 15) && AltIndex(hardware.function) == 0
+			!group.empty() ? " of " : "", group.c_str(),
+			IsConsole(gpio, hardware.function)
 				? ", the system's serial console" : "");
 		text << line;
 	}
@@ -664,20 +692,20 @@ MainWindow::_HandleEvents(BMessage* message)
 		return;
 	}
 
-	uint32 changed = 0;
+	uint64 changed = 0;
 	for (size_t i = 0; i < size / sizeof(GpioEvent); i++) {
 		const GpioEvent& event = events[i];
-		if (event.pin >= kBcmPinCount)
+		if (event.pin >= kMaxGpioPins)
 			continue;
 		PinEntry& entry = fPins[event.pin];
 		if (!entry.Configured())
 			continue;
 		entry.history.Add(event.time, event.level);
-		changed |= 1u << event.pin;
+		changed |= 1ull << event.pin;
 	}
-	for (int bcm = 0; changed != 0; bcm++, changed >>= 1) {
+	for (int gpio = 0; changed != 0; gpio++, changed >>= 1) {
 		if ((changed & 1) != 0)
-			fPinsView->UpdateLevel(bcm);
+			fPinsView->UpdateLevel(gpio);
 	}
 
 	int32 lost;
@@ -691,42 +719,42 @@ MainWindow::_HandleEvents(BMessage* message)
 
 
 void
-MainWindow::_ToggleOutput(int bcm)
+MainWindow::_ToggleOutput(int gpio)
 {
-	PinEntry& entry = fPins[bcm];
+	PinEntry& entry = fPins[gpio];
 	if (entry.setting.mode != PinMode::Output || entry.holding)
 		return;
 
 	bool level = !entry.StableLevel();
-	status_t status = fHardware->Write(bcm, level);
+	status_t status = fHardware->Write(gpio, level);
 	if (status != B_OK) {
 		BString text;
-		text.SetToFormat("%s: %s", PinLabel(bcm).String(), strerror(status));
+		text.SetToFormat("%s: %s", Label(gpio).String(), strerror(status));
 		_ShowMessage(text);
 		return;
 	}
 	entry.setting.level = level ? 1 : 0;
-	fPinsView->UpdatePin(bcm);
+	fPinsView->UpdatePin(gpio);
 	_UpdateStatus();
 }
 
 
 void
-MainWindow::_HoldOutput(int bcm, bool pressed)
+MainWindow::_HoldOutput(int gpio, bool pressed)
 {
-	PinEntry& entry = fPins[bcm];
+	PinEntry& entry = fPins[gpio];
 	if (entry.setting.mode != PinMode::Output || pressed == entry.holding)
 		return;
 
 	if (pressed) {
 		entry.holdLevel = entry.StableLevel();
 		entry.holding = true;
-		fHardware->Write(bcm, !entry.holdLevel);
+		fHardware->Write(gpio, !entry.holdLevel);
 	} else {
 		entry.holding = false;
-		fHardware->Write(bcm, entry.holdLevel);
+		fHardware->Write(gpio, entry.holdLevel);
 	}
-	fPinsView->UpdatePin(bcm);
+	fPinsView->UpdatePin(gpio);
 }
 
 
@@ -739,9 +767,9 @@ MainWindow::_RefreshState()
 	if (fHardware->GetState(state) != B_OK)
 		return;
 
-	for (int bcm = 0; bcm < kBcmPinCount; bcm++) {
-		PinEntry& entry = fPins[bcm];
-		const PinHardwareState& now = state.pins[bcm];
+	for (int gpio = 0; gpio < kMaxGpioPins; gpio++) {
+		PinEntry& entry = fPins[gpio];
+		const PinHardwareState& now = state.pins[gpio];
 		PinHardwareState& before = entry.hardware;
 		bool changed = now.function != before.function
 			|| now.claimedElsewhere != before.claimedElsewhere
@@ -749,7 +777,7 @@ MainWindow::_RefreshState()
 				|| now.level != before.level));
 		before = now;
 		if (changed && !fApplying)
-			fPinsView->UpdatePin(bcm);
+			fPinsView->UpdatePin(gpio);
 
 		if (entry.Configured())
 			entry.history.Trim(state.time - kHistoryKept);
@@ -833,7 +861,7 @@ MainWindow::_UpdateStatus()
 	BString status = fHardwareName;
 	if (fHardware != NULL) {
 		HardwareDetails details = fHardware->Details();
-		BoardInfo board = DecodeRevision(details.revision);
+		BoardInfo board = DescribeBoard(details.board, details.revision);
 		if (board.known && !details.simulated)
 			status << " \xc2\xb7 " << board.model.c_str();
 	}
@@ -943,8 +971,8 @@ MainWindow::OpenFile(const entry_ref& ref)
 	message.SetToFormat("Opened %s", ref.name);
 	if (!skipped.empty()) {
 		message << "; left out pins the header does not offer:";
-		for (int bcm : skipped)
-			message << " " << bcm;
+		for (int gpio : skipped)
+			message << " " << gpio;
 	}
 	_ShowMessage(message);
 }

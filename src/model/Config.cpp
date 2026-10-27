@@ -94,10 +94,29 @@ ParseConfiguration(const std::string& text, Configuration& config,
 	if (functions == NULL || !functions->IsObject())
 		return Fail(error, "Not a configuration file: no pin functions");
 
+	// AirPins writes the board of other boards than the Pi, whose GPIO
+	// numbers pigg's files have
+	std::string boardId;
+	const JsonValue* boardValue = root.Find("board");
+	if (boardValue != NULL) {
+		if (!boardValue->IsString())
+			return Fail(error, "Not a configuration file: bad board");
+		boardId = boardValue->String();
+	}
+	Board board;
+	if (!BoardForId(boardId, board))
+		return Fail(error, "The configuration is for a board AirPins does not"
+			" know (\"" + boardId + "\").");
+	if (board != CurrentBoard()) {
+		return Fail(error, std::string("The configuration is for the ")
+			+ BoardName(board) + "'s pins; these are the "
+			+ BoardName(CurrentBoard()) + "'s.");
+	}
+
 	Configuration result;
 	for (const auto& member : functions->Members()) {
 		char* end;
-		long bcm = strtol(member.first.c_str(), &end, 10);
+		long gpio = strtol(member.first.c_str(), &end, 10);
 		if (member.first.empty() || *end != '\0')
 			return Fail(error, "Bad pin number \"" + member.first + "\"");
 
@@ -106,12 +125,12 @@ ParseConfiguration(const std::string& text, Configuration& config,
 			return Fail(error, "Pin " + member.first
 				+ " has a function AirPins does not know");
 		}
-		if (!IsConfigurable((int)bcm)) {
+		if (!IsConfigurable((int)gpio)) {
 			if (skipped != NULL)
-				skipped->push_back((int)bcm);
+				skipped->push_back((int)gpio);
 			continue;
 		}
-		result.pins[(int)bcm] = setting;
+		result.pins[(int)gpio] = setting;
 	}
 
 	config = result;
@@ -122,7 +141,13 @@ ParseConfiguration(const std::string& text, Configuration& config,
 std::string
 FormatConfiguration(const Configuration& config)
 {
-	std::string text = "{\"pin_functions\":{";
+	std::string text = "{";
+	if (CurrentBoard() != Board::RaspberryPi4) {
+		text += "\"board\":\"";
+		text += BoardId(CurrentBoard());
+		text += "\",";
+	}
+	text += "\"pin_functions\":{";
 	bool first = true;
 	for (const auto& entry : config.pins) {
 		const PinSetting& setting = entry.second;

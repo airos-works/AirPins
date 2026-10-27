@@ -96,9 +96,9 @@ App::AboutRequested()
 {
 	BAboutWindow* about = new BAboutWindow(kAppName, kAppSignature);
 	about->SetVersion(kAppVersion);
-	about->AddDescription("Configure the Raspberry Pi's GPIO pins as inputs"
-		" or outputs, set outputs and watch the levels of inputs and outputs"
-		" change over time.");
+	about->AddDescription("Configure the GPIO pins of the Raspberry Pi and"
+		" the Radxa Cubie A7S as inputs or outputs, set outputs and watch the"
+		" levels of inputs and outputs change over time.");
 	about->AddCopyright(2026, "air/OS contributors");
 	const char* pigg[] = {
 		"AirPins is a native Haiku version of pigg, the Raspberry Pi GPIO"

@@ -13,7 +13,7 @@ namespace airpins {
 
 //! Everything the window knows about one GPIO.
 struct PinEntry {
-	int					bcm = -1;
+	int					gpio = -1;
 	PinSetting			setting;		// what the user configured
 	PinHistory			history;		// levels while configured
 	PinHardwareState	hardware;		// as last read from the hardware

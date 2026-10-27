@@ -30,7 +30,7 @@ DeviceWindow::DeviceWindow(BWindow* parent, const HardwareDetails& details)
 {
 	AddToSubset(parent);
 
-	BoardInfo board = DecodeRevision(details.revision);
+	BoardInfo board = DescribeBoard(details.board, details.revision);
 	BString serial;
 	if (details.serial != 0)
 		serial.SetToFormat("%016" B_PRIx64, details.serial);
@@ -44,8 +44,8 @@ DeviceWindow::DeviceWindow(BWindow* parent, const HardwareDetails& details)
 	if (details.simulated)
 		driver = "None (no GPIO hardware found)";
 	else
-		driver.SetToFormat("/dev/misc/rpi_gpio, interface version %" B_PRIu32,
-			details.apiVersion);
+		driver.SetToFormat("%s, interface version %" B_PRIu32,
+			details.devicePath.String(), details.apiVersion);
 	BString application;
 	application.SetToFormat("%s %s", kAppName, kAppVersion);
 
@@ -53,8 +53,10 @@ DeviceWindow::DeviceWindow(BWindow* parent, const HardwareDetails& details)
 		{ "Hardware:", details.name },
 		{ "Model:", board.known ? BString(board.model.c_str())
 			: BString("not known") },
-		{ "Revision code:", details.revision != 0
-			? BString(board.revisionCode.c_str()) : BString("not known") },
+		// only the Raspberry Pi has revision codes
+		{ "Revision code:", details.board != Board::RaspberryPi4 ? BString()
+			: details.revision != 0 ? BString(board.revisionCode.c_str())
+			: BString("not known") },
 		{ "Processor:", board.known ? BString(board.processor.c_str()) : "" },
 		{ "Memory:", board.known ? BString(board.memory.c_str()) : "" },
 		{ "Manufacturer:", board.known ? BString(board.manufacturer.c_str())
@@ -62,7 +64,7 @@ DeviceWindow::DeviceWindow(BWindow* parent, const HardwareDetails& details)
 		{ "Serial number:", serial },
 		{ "Driver:", driver },
 		{ "Input changes:", events },
-		{ "Configurable pins:", "26 (GPIO 2 to 27 on the 40-pin header)" },
+		{ "Configurable pins:", ConfigurablePinsText().c_str() },
 		{ "Application:", application },
 	};
 

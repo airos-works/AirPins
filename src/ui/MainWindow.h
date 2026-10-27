@@ -39,10 +39,11 @@ public:
 
 private:
 			void				_BuildMenu(BMenuBar* menuBar);
+			void				_UpdateLayoutLabels();
 			void				_UseHardware(bool simulated);
 			void				_ReleaseHardware();
 
-			bool				_SetPin(int bcm, const PinSetting& setting,
+			bool				_SetPin(int gpio, const PinSetting& setting,
 									bool ask);
 			void				_ApplyConfiguration(const Configuration& config,
 									bool ask);
@@ -52,8 +53,8 @@ private:
 			bool				_ConfirmTakeOver(const std::vector<int>& pins);
 
 			void				_HandleEvents(BMessage* message);
-			void				_ToggleOutput(int bcm);
-			void				_HoldOutput(int bcm, bool pressed);
+			void				_ToggleOutput(int gpio);
+			void				_HoldOutput(int gpio, bool pressed);
 			void				_RefreshState();
 			void				_Tick();
 
@@ -73,7 +74,7 @@ private:
 			void				_ShowDeviceDetails();
 			void				_FitToContent();
 
-			PinEntry			fPins[kBcmPinCount];
+			PinEntry			fPins[kMaxGpioPins];
 			GpioHardware*		fHardware;
 			EventPump*			fPump;
 			BString				fHardwareName;

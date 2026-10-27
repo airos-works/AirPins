@@ -6,6 +6,6 @@
 
 namespace airpins {
 
-static const char* const kAppVersion = "1.0.0";
+static const char* const kAppVersion = "1.1.0";
 
 }	// namespace airpins

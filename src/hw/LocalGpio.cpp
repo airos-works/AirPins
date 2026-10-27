@@ -20,9 +20,10 @@ namespace {
 
 class LocalGpio : public GpioHardware {
 public:
-	LocalGpio(int fd, const rpi_gpio_info& info)
+	LocalGpio(int fd, const char* path, const rpi_gpio_info& info)
 		:
 		fDevice(fd),
+		fPath(path),
 		fInfo(info)
 	{
 	}
@@ -37,6 +38,9 @@ public:
 	{
 		HardwareDetails details;
 		details.name = "Local GPIO";
+		details.devicePath = fPath;
+		details.board = fInfo.board == RPI_GPIO_BOARD_CUBIE_A7S
+			? Board::CubieA7S : Board::RaspberryPi4;
 		details.revision = fInfo.board_revision;
 		details.serial = fInfo.board_serial;
 		details.edgeInterrupts
@@ -53,7 +57,7 @@ public:
 			return status;
 
 		state.time = raw.time;
-		for (int pin = 0; pin < kBcmPinCount; pin++) {
+		for (int pin = 0; pin < kMaxGpioPins; pin++) {
 			PinHardwareState& out = state.pins[pin];
 			out.function = raw.function[pin];
 			out.pull = raw.pull[pin];
@@ -129,6 +133,7 @@ private:
 	}
 
 	int				fDevice;
+	const char*		fPath;
 	rpi_gpio_info	fInfo;
 };
 
@@ -138,12 +143,23 @@ private:
 GpioHardware*
 CreateLocalGpio(BString* error)
 {
-	int fd = open(RPI_GPIO_DEVICE_PATH, O_RDWR | O_CLOEXEC);
-	if (fd < 0) {
-		if (error != NULL) {
-			error->SetToFormat("%s: %s", RPI_GPIO_DEVICE_PATH,
-				strerror(errno));
+	// the Raspberry Pi's driver, or another board's with its interface
+	static const char* const kPaths[] = {
+		RPI_GPIO_DEVICE_PATH,
+		SUNXI_GPIO_DEVICE_PATH
+	};
+	int fd = -1;
+	const char* path = NULL;
+	for (const char* candidate : kPaths) {
+		fd = open(candidate, O_RDWR | O_CLOEXEC);
+		if (fd >= 0) {
+			path = candidate;
+			break;
 		}
+	}
+	if (fd < 0) {
+		if (error != NULL)
+			error->SetToFormat("%s: %s", RPI_GPIO_DEVICE_PATH, strerror(errno));
 		return NULL;
 	}
 
@@ -155,7 +171,16 @@ CreateLocalGpio(BString* error)
 		close(fd);
 		return NULL;
 	}
-	return new LocalGpio(fd, info);
+	if (info.board != RPI_GPIO_BOARD_RPI4
+		&& info.board != RPI_GPIO_BOARD_CUBIE_A7S) {
+		if (error != NULL) {
+			error->SetToFormat("%s drives a board AirPins does not know (%"
+				B_PRIu32 ").", path, info.board);
+		}
+		close(fd);
+		return NULL;
+	}
+	return new LocalGpio(fd, path, info);
 }
 
 }	// namespace airpins

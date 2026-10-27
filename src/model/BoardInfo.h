@@ -7,10 +7,12 @@
 #include <stdint.h>
 #include <string>
 
+#include "PinTable.h"
+
 
 namespace airpins {
 
-//! What a Raspberry Pi revision code says about the board.
+//! What a Raspberry Pi revision code, or the board's driver, says about it.
 struct BoardInfo {
 	bool		known = false;
 	std::string	model;			// "Raspberry Pi 4 Model B Rev 1.5"
@@ -21,5 +23,8 @@ struct BoardInfo {
 };
 
 BoardInfo DecodeRevision(uint32_t revision);
+//! The Raspberry Pi's from its revision code; other boards' from their
+//! driver alone.
+BoardInfo DescribeBoard(Board board, uint32_t revision);
 
 }	// namespace airpins

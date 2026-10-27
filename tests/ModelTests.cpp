@@ -168,36 +168,115 @@ TestBoards()
 static void
 TestPinTable()
 {
+	SetBoard(Board::RaspberryPi4);
 	int configurable = 0;
-	for (int i = 0; i < kHeaderPinCount; i++) {
+	for (int i = 0; i < HeaderPinCount(); i++) {
 		const HeaderPin& pin = HeaderPinAt(i);
 		CHECK(pin.board == i + 1);
 		if (pin.kind == PinKind::Gpio) {
 			configurable++;
-			CHECK(IsConfigurable(pin.bcm));
-			CHECK(HeaderPinForBcm(pin.bcm) == &pin);
+			CHECK(IsConfigurable(pin.gpio));
+			CHECK(HeaderPinForGpio(pin.gpio) == &pin);
 		}
 	}
+	CHECK(HeaderPinCount() == 40 && ConnectorCount() == 1);
 	CHECK(configurable == 26);
+	CHECK(GpioOrder().size() == 26 && GpioOrder().front() == 2);
 	CHECK(!IsConfigurable(0) && !IsConfigurable(1) && !IsConfigurable(28));
-	CHECK(HeaderPinForBcm(14)->board == 8);
-	CHECK(HeaderPinForBcm(21)->board == 40);
+	CHECK(HeaderPinForGpio(14)->board == 8);
+	CHECK(HeaderPinForGpio(21)->board == 40);
+	CHECK(PinLabel(17) == "GPIO17 (pin 11)");
 	CHECK(strcmp(AltSignal(14, 0), "TXD0") == 0);
 	CHECK(strcmp(AltSignal(15, 5), "RXD1") == 0);
 	CHECK(AltSignal(16, 0) == NULL);
-	CHECK(strcmp(SignalGroup("TXD0"), "UART0") == 0);
-	CHECK(strcmp(SignalGroup("SDA1"), "I2C1") == 0);
-	CHECK(strcmp(SignalGroup("SPI0_MOSI"), "SPI0") == 0);
-	CHECK(strcmp(SignalGroup("SD0_CLK"), "SD host 0") == 0);
-	CHECK(strcmp(SignalGroup("SD5"), "secondary memory") == 0);
+	CHECK(SignalGroup("TXD0") == "UART0");
+	CHECK(SignalGroup("SDA1") == "I2C1");
+	CHECK(SignalGroup("SPI0_MOSI") == "SPI0");
+	CHECK(SignalGroup("SD0_CLK") == "SD host 0");
+	CHECK(SignalGroup("SD5") == "secondary memory");
+	CHECK(SignalGroup(NULL).empty());
 	CHECK(AltIndex(kFunctionAlt0) == 0 && AltIndex(kFunctionAlt5) == 5);
 	CHECK(AltIndex(kFunctionInput) == -1);
 	CHECK(strcmp(FunctionSelectName(kFunctionAlt4), "ALT4") == 0);
-	CHECK(DefaultPullUp(8) && !DefaultPullUp(9));
+	CHECK(DefaultPull(8) == Pull::Up && DefaultPull(9) == Pull::Down);
+	CHECK(IsConsole(14, kFunctionAlt0) && !IsConsole(14, kFunctionInput));
+	CHECK(!IsSwitchedOff(15));
 
 	PinColor ground = ColorFor(HeaderPinAt(5));
 	CHECK(HeaderPinAt(5).kind == PinKind::Ground);
 	CHECK(ground.red == 20);
+}
+
+
+static void
+TestCubieTable()
+{
+	SetBoard(Board::CubieA7S);
+	CHECK(HeaderPinCount() == 45 && ConnectorCount() == 2);
+	int configurable = 0;
+	for (int c = 0; c < ConnectorCount(); c++) {
+		const Connector& connector = ConnectorAt(c);
+		for (int i = 0; i < connector.pinCount; i++) {
+			const HeaderPin& pin = HeaderPinAt(connector.first + i);
+			CHECK(pin.connector == c && pin.board == i + 1);
+			// the driver numbers pins by position: J6 pin n is 30 + n
+			if (pin.gpio >= 0)
+				CHECK(pin.gpio == (c == 0 ? 0 : 30) + pin.board);
+			if (pin.kind == PinKind::Gpio) {
+				configurable++;
+				CHECK(HeaderPinForGpio(pin.gpio) == &pin);
+				// every pin's functions are known
+				bool any = false;
+				for (int alt = 0; alt < AltCount(); alt++)
+					any |= AltSignal(pin.gpio, alt) != NULL;
+				CHECK(any);
+			}
+		}
+	}
+	CHECK(configurable == 31);
+	CHECK(ConfigurablePinsText().compare(0, 3, "31 ") == 0);
+	CHECK(GpioOrder().size() == 31);
+	CHECK(GpioOrder().front() == 7);		// PB0
+	CHECK(GpioOrder().back() == 33);		// PM4
+	CHECK(!IsConfigurable(8) && !IsConfigurable(10));	// the console
+	CHECK(HeaderPinForGpio(8)->kind == PinKind::Reserved);
+	CHECK(!IsConfigurable(1) && !IsConfigurable(34) && !IsConfigurable(0));
+	CHECK(PinLabel(7) == "PB0 (J11 pin 7)");
+	CHECK(PinLabel(40) == "PG0 (J6 pin 10)");
+	CHECK(PinPosition(*HeaderPinForGpio(40)) == "J6 pin 10");
+	CHECK(strcmp(AltSignal(3, AltIndex(6)), "TWI7-SDA") == 0);
+	CHECK(strcmp(AltSignal(12, AltIndex(3)), "I2S0-BCLK") == 0);
+	CHECK(AltSignal(12, AltIndex(2)) == NULL);
+	CHECK(SignalGroup("UART2-TX") == "UART2");
+	CHECK(SignalGroup("TWI7-SDA") == "TWI7 (I2C)");
+	CHECK(SignalGroup("S-UART0-TX") == "S-UART0");
+	CHECK(SignalGroup("LCD1").empty());
+	CHECK(AltIndex(kFunctionInput) == -1 && AltIndex(kFunctionOutput) == -1);
+	CHECK(AltIndex(kSunxiFunctionOff) == -1 && IsSwitchedOff(15));
+	CHECK(strcmp(FunctionSelectName(2), "F2") == 0);
+	CHECK(strcmp(FunctionSelectName(kSunxiFunctionInterrupt), "EINT") == 0);
+	CHECK(DefaultPull(7) == Pull::None);
+	CHECK(IsConsole(8, 2) && !IsConsole(7, 2));
+
+	// configurations name the board
+	Configuration config;
+	config.pins[26].mode = PinMode::Output;
+	config.pins[26].level = 1;
+	std::string text = FormatConfiguration(config);
+	CHECK(text == "{\"board\":\"cubie-a7s\",\"pin_functions\":"
+		"{\"26\":{\"Output\":true}}}");
+	Configuration read;
+	std::string error;
+	CHECK(ParseConfiguration(text, read, &error) && read == config);
+	// a Pi's file does not open here, nor this one on the Pi
+	CHECK(!ParseConfiguration("{\"pin_functions\":{\"26\":{\"Output\":"
+		"true}}}", read, &error));
+	CHECK(error.find("Raspberry Pi 4") != std::string::npos);
+	CHECK(!ParseConfiguration("{\"board\":\"x\",\"pin_functions\":{}}",
+		read, &error));
+	SetBoard(Board::RaspberryPi4);
+	CHECK(!ParseConfiguration(text, read, &error));
+	CHECK(FormatConfiguration(config).find("board") == std::string::npos);
 }
 
 
@@ -250,6 +329,7 @@ main()
 	TestJson();
 	TestBoards();
 	TestPinTable();
+	TestCubieTable();
 	TestHistory();
 
 	printf("%d checks, %d failed\n", sChecks, sFailures);
