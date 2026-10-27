@@ -1,0 +1,19 @@
+# Builds the air/OS package (arm64: the Raspberry Pi 4 and Cubie A7S images) on every push to
+# master and publishes it to the rolling "latest" release; the image builds take it from the package
+# pool. The pipeline lives in jmgasper/airos-ci (apps/build-app-packages.sh, build_airpins).
+name: air/OS build
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  airos:
+    uses: jmgasper/airos-ci/.github/workflows/app.yml@main
+    with:
+      app: airpins
+      repo-dir: airpins
+      architectures: arm64
+    permissions:
+      contents: write
