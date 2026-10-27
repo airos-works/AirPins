@@ -7,6 +7,18 @@ waveform. Configurations are saved as `.pigg` files.
 
 <img src="resources/branding/AirPins.png" alt="AirPins icon artwork" width="160">
 
+<!-- airos-ci:latest-builds:start -->
+## Latest builds
+
+Built automatically by air/OS CI from commit `73e13e6` on 2026-10-27 ([all files](https://github.com/jmgasper/AirPins/releases/tag/latest)).
+
+| Architecture | Package |
+|---|---|
+| arm64 | [airpins-1.1.0-1-arm64.hpkg](https://github.com/jmgasper/AirPins/releases/download/latest/airpins-1.1.0-1-arm64.hpkg) |
+
+Install with `pkgman install <file>`, or copy the file into `/boot/system/packages`. Haiku SDK: x86_64 hrev60207-2036-g3d3d333c06, arm64 hrev60207-2036-g3d3d333c06.
+<!-- airos-ci:latest-builds:end -->
+
 ## Based on pigg
 
 **AirPins is a native Haiku version of [pigg](https://github.com/andrewdavidmackenzie/pigg)**,
